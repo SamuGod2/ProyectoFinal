@@ -1,0 +1,193 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{Interfaz humano-m\'aquina por gestoscon doble seguridad (EMG + Voz)\\
+}
+\author{
+  \IEEEauthorblockN{Samuel Jefte Cort\'es Ram\'irez}
+  \IEEEauthorblockA{\textit{Facultad de Instrumentaci\'on Electr\'onica} \\
+    \textit{Universidad Veracruzana}\\
+    Xalapa, M\'exico \\
+    zS23013794@estudiantes.uv.mx}
+  \and
+  \IEEEauthorblockN{Flor Isabel Caballero Trinidad}
+  \IEEEauthorblockA{\textit{Facultad de Instrumentaci\'on Electr\'onica} \\
+    \textit{Universidad Veracruzana}\\
+    Xalapa, M\'exico \\
+    zS23013781@estudiantes.uv.mx}
+  \and
+  \IEEEauthorblockN{Eduardo Alejandro P\'erez Rold\'an}
+  \IEEEauthorblockA{\textit{Facultad de Instrumentaci\'on Electr\'onica} \\
+    \textit{Universidad Veracruzana}\\
+    Xalapa, M\'exico \\
+    zS23023424@estudiantes.uv.mx}
+}
+
+\maketitle
+
+\begin{abstract}
+Este reporte presenta el diseño e implementación de una Interfaz Humano-M\'aquina (HMI) bimodal para el control de gestos, basada en un sistema de doble seguridad que utiliza se\~nalizaci\'on electromiogr\'afica (EMG) y comandos de voz. Un microcontrolador ESP32 realiza la conversi\'on anal\'ogico-digital (ADC), mientras que una interfaz gr\'afica de usuario (GUI) desarrollada en Python integra ambas modalidades. El procesamiento de EMG analiza la activaci\'on muscular mediante ventanas deslizantes de 200 ms (RMS/MAV), mientras que el canal ac\'ustico identifica monosilabas mediante un algoritmo de detecci\'on de actividad de voz (VAD) basado en energ\'ia y tasa de cruces por cero (ZCR). El sistema aplica una l\'ogica de coincidencia bimodal: una acci\'on se ejecuta solo si la contracci\'on muscular y el comando de voz estan en estado activo a la vez, de lo contrario, se activa un bloqueo de seguridad que despliega el estado del fallo.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Interfaz Humano-Máquina (HMI), Electromiografía (EMG), Detección de Actividad de Voz (VAD), Fusión Bimodal, Sistema de Doble Seguridad.
+\end{IEEEkeywords}
+
+\section{Introducci\'on}
+La interfaces hombre-maquina han sido una herramienta importante a lo largo de la historia humana, teniendo multiples usos, desde simplemente mostrar un ECG, hasta interactuar con dispositivos de asistencia y sistemas rob\'oticos mediante variables biol\'ogicas, estas interfaces dependen de una sola modalidad, como la electromiograf\'ia de superficie (EMG), para registrar la actividad muscular voluntaria del usuario, pero estos cuentan con un problema, los sistemas monomodales presentan limitaciones en entornos reales, son altamente susceptibles a falsos positivos provocados por artefactos de movimiento o contracciones involuntarias, lo que reduce la seguridad del paciente. Por otra parte, los sistemas de control basados exclusivamente en comandos de voz enfrentan desaf\'ios similares ante el ruido ambiental y las interferencias ac\'usticas, para reducir estas deficiencias, existen los sistemas multinivel o bimodales, al combinar canales de informaci\'on de naturaleza distinta, es posible robustecer los criterios de decisi\'on y disminuir las activaciones accidentales en actuadores y sistemas de asistencia.
+
+Este trabajo presenta el dise\~no y desarrollo de una HMI bimodal con doble seguridad que integra se\~nales de EMG provenientes de los m\'usculos flexores/extensores del antebrazo y comandos accionados por voz capturados en tiempo real. El sistema emplea un microcontrolador ESP32 para las etapas de conversi\'on anal\'ogico-digital y usa el entorno en Python para el procesamiento de las se\~nales junto con una interfaz gr\'afica de usuario (GUI) donde se implementa la l\'ogica de coincidencia temporal, bloqueando cualquier acci\'on si no se superan los umbrales a la vez. 
+
+\section{II. Metodologia}
+
+\subsection{Adquisici\'on de Se\~nales y Hardware}
+Para la adquisici\'on de la se\~nal de EMG se utiliz\'o el microcontrolador ESP32\cite{b2} conectado a un sensor muscular Myoware 2.0\cite{b1}, dicho sensor se coloca en el antebrazo del sujeto al que se desee realizar una medici\'on, este cuenta con un amplificador de instrumentaci\'n cuyo proposito es eliminar el ruido usando el rechazo al modo Com\'un o CMRR, como la señal EMG cruda tiene componentes tanto positivos como negativos, el circuito invierte todos los voltajes negativos a positivos, preparando la señal para el c\'alculo de su magnitud, finalmente se pasa la señal por un filtro paso-bajas para suavizar los picos rápidos de alta frecuencia, el sensor cuenta con 2 salidas, una de ellas es la salida ENV, que es la senal que pasa por el proceso de filtrado recientemente mencionado, y la otra salida es RAW, la cual no se usara para la presente practica, el documento permite usar RMS o MAV sobre ventanas de 200 ms. En nuestro caso usamos la salida
+ENV del MyoWare, que ya representa una envolvente acondicionada de la actividad muscular, por eso se calcul\'o un promedio temporal sobre esa envolvente. Si se usara la señal RAW del sensor, se podr\'ia calcular RMS o MAV directamente
+
+El microcontrolador ESP32 recibe informacion de el sensor, el micro promedia 40 muestras de la salida ENV del MyoWare, como cada muestra se toma cada 5 ms, el promedio representa una ventana de 200 ms, esto para suavizar fluctuaciones rápidas y poder tener en  Python valores estables de activación muscular.
+
+Para la adquisicion de la voz, se utiliza el microfono interno de la laptop en la que este corriendo el c\'odigo, a una frecuencia de muestreo de 48000 Hz y la voz se procesa en ventanas de 0.2 segundos. Como ya mencion\'e que el audio se muestrea a 48000 Hz, cada ventana contiene 9600 muestras. 
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\columnwidth]{Diagrama c.jpg}
+    \caption{Diagrama de conecci\'n}
+    \label{fig:diagrama_sistema}
+\end{figure}
+
+\begin{table}[htbp]
+\caption{Componentes y Hardware del Proyecto}
+\begin{center}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Componente} & \textbf{Especificaci\'on} & \textbf{Funci\'on Biom\'edica} \\ \hline
+ESP32 DevKit & 12-bit ADC & Procesamiento y ADC \\ \hline
+MyoWare 2.0 & Salida \texttt{ENV} anal\'ogica & Captura muscular \\ \hline
+Micr\'ofono & M\'odulo Electret anal\'ogico & Captura de voz \\ \hline
+Electrodos & Ag/AgCl superficial de gel & Interfaz piel-sensor \\ \hline
+Protoboard & Tablilla de conexiones & Acoplamiento el\'ectrico \\ \hline
+\end{tabular}
+\label{tab:materiales}
+\end{center}
+\end{table}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[height=15 cm, keepaspectratio]{Flujo.png} 
+    \caption{Diagrama de flujo del algoritmo.}
+    \label{fig:diagrama_flujo}
+\end{figure}
+% Aquí explicas cómo conectaron el canal de EMG del antebrazo 
+% y el micrófono analógico a los pines ADC del ESP32.
+
+\subsection{Procesamiento Digital de Se\~nales en Python}
+El c\'odigo de python usa el procesamiento por ventanas, el cual consiste en analizar segmentos cortos de señal en lugar de toda la señal completa, en nuestro sistema usamos ventanas de 0.2 segundos. Esto permite: Procesar en tiempo real, actualizar la GUI aproximadamente 5 veces por segundo, detectar cambios rápidos en EMG y voz y evitar que la interfaz se congele. Como cada ventana dura 0.2 segundos, la GUI puede actualizarse 5 veces por segundo para poder cumplir el requisito de fluidez y procesamiento en tiempo real. El sistema usa un buffer de 10 ventanas, como cada ventana representa 0.2 segundos, el buffer equivale a 2 segundos, esto permite calcular promedios temporales y observar tendencias sin congelar interfaz gr\'afica
+
+El EMG no sera igual para todas las personas, debido a factores fisiol\'ogicos, f\'isicos y el\'ectricos tales como la correcta colocacion de los electrodos, la fuerza de contraccion, etc. asi que con el objetivo de optimizar la toma de este, se decidi\'o colocar un umbral el cual se deber\'a calcular antes de iniciar con la funci\'on principal de la interfaz, este se obtiene usando la siguiente formula general: Umbral EMG = reposo + alpha * (contraccion - reposo), donde alpha toma el valor de .40, el factor 0.40 se eligió experimentalmente porque permitió detectar mejor la contracción voluntaria sin exigir una contracción máxima. Además, está parametrizado en el código mediante FACTOR\_UMBRAL\_EMG, por lo que puede cambiarse a 0.50 si se desea un criterio más estricto.
+
+El sistema implementa un algoritmo bá\'asico de Detección de Actividad de Voz (VAD), el cual responde en cada ventana de audio a la pregunta de si existió la energía sonora suficiente para validar la presencia de un comando monosilábico real para lograrlo, la lógica se basa en dos parámetros procesados en Python: la energía de la señal de voz, que determina la intensidad acústica capturada, y la tasa de cruces por cero (ZCR, Zero Crossing Rate), la cual ayuda no tomar en cuenta el ruido de fondo y confirmar que las oscilaciones del evento correspondan a las características frecuenciales típicas de la voz humana.\cite{b6} La energ\'ia promedio de la ventana de audio ($E_{\text{voz}}$) se utiliza para determinar la intensidad ac\'ustica del comando y se calcula mediante el promedio del cuadrado de las muestras dentro de una ventana de $0.2\text{ s}$, de acuerdo con la (\ref{eq:energia}):
+
+\begin{equation}
+E_{\text{voz}} = \frac{1}{N} \sum_{n=0}^{N-1} x[n]^2
+\label{eq:energia}
+\end{equation}
+
+donde $N$ representa el n\'umero total de muestras de audio en la ventana, $x[n]$ es la $n$-\'esima muestra digitalizada y $x[n]^2$ denota la muestra elevada al cuadrado, cuando el usuario emite un comando verbal, la amplitud de la se\~nal de audio se incrementa significativamente; al promediar estos componentes cuadr\'aticos, la funci\'on calcular\_energia(x) implementada en Python extrae una m\'etrica robusta de intensidad que, al superar un umbral previamente calibrado, permite al sistema validar formalmente la existencia de actividad vocal.
+
+Como segundo criterio de validaci\'on para el algoritmo VAD, se implementa la Tasa de Cruces por Cero (ZCR). Debido a que eventos inesperados o propios de la toma de datos como golpes, transitorios f\'isicos o picos de ruido ambiental pueden registrar una energ\'ia elevada, la m\'etrica ZCR permite observar si el evento ac\'ustico presenta un comportamiento espectral compatible con la voz humana analizando cu\'antas veces la se\~nal corta el eje horizontal , osea 0 volts. Matem\'aticamente, el c\'alculo se realiza en Python mediante la (\ref{eq:zcr}):
+
+\begin{equation}
+\text{ZCR} = \frac{1}{2N} \sum_{n=1}^{N-1} |\text{signo}(x[n]) - \text{signo}(x[n-1])|
+\label{eq:zcr}
+\end{equation}
+
+donde $N$ es el n\'umero total de muestras en la ventana de audio, $x[n]$ representa la muestra actual, $x[n-1]$ siendo la muestra previa y $\text{signo}(\cdot)$ corresponde a la funci\'on indicadora que devuelve $+1$, $-1$ o $0$ seg\'un la polaridad del dato analizado. En el c\'odigo desarrollado, se establecieron experimentalmente los umbrales, acotados entre ZCR\_MIN = 0.02$ y $\texttt{ZCR\_MAX} = 0.30, cualquier evento de alta energ\'ia que su cruces este fuera de este rango de frecuencias, es rechazado por el sistema de seguridad para evitar activaciones falsas de la interfaz.
+% Aquí explicas cómo programaron las ventanas de 200 ms, 
+% el cálculo del RMS/MAV para el músculo, y el algoritmo 
+% VAD (energía y cruces por cero ZCR) para la voz.
+
+\subsection{L\'ogica de Seguridad e Interfaz Gr\'afica}
+El núcleo de control de la interfaz gr\'afica se fundamenta en un modelo de fusi\'on bimodal, enfocado en un sistema de doble seguridad, el cual procesa en tiempo real las variables EMG y la voz para determinar el estado operativo que mostrar\'a la interfaz. La activaci\'on f\'isica o virtual del sistema est\'a regida estrictamente por la operaci\'on l\'ogica AND expuesta en la (\ref{eq:logica_and}):
+
+\begin{equation}
+\text{Activado} = \text{EMG\_activo} \land \text{Voz\_activa}
+\label{eq:logica_and}
+\end{equation}
+
+Ambas condiciones de entrada deben cumplirse a la vez dentro de la misma ventana temporal de observaci\'on. En caso de que alguna de las variables no supere el umbral anal\'ogico o algor\'itmico correspondiente, la GUI ejecuta un protocolo de bloqueo de seguridad y en pantalla un mensaje con el motivo espec\'ifico del fallo para retroalimentaci\'on del usuario. El comportamiento del algor\'itmo y las transiciones del sistema de decisi\'on se detallan en la Tabla~\ref{tab:tabla_verdad}.
+
+\begin{table}[htbp]
+\caption{Tabla de Verdad y Estados del Sistema de Decisi\'on}
+\begin{center}
+\begin{tabular}{|c|c|l|}
+\hline
+\textbf{EMG\_activo} & \textbf{Voz\_activa} & \textbf{Estado del Sistema (GUI)} \\ \hline
+0                    & 0                    & REPOSO / INACTIVO                 \\ \hline
+1                    & 0                    & FALTA VOZ (Bloqueo)               \\ \hline
+0                    & 1                    & FALTA MOVIMIENTO MUSCULAR\\ 
+\hline
+1                    & 1                    & \textbf{ACTIVADO}                 \\ \hline
+\end{tabular}
+\label{tab:tabla_verdad}
+\end{center}
+\end{table}
+
+En el desarrollo del software final, se descart\'o la implementaci\'on de arquitecturas de filtrado digital de alta carga computacional tales como filtros de respuesta al impulso finita (FIR), infinita (IIR, ej. Butterworth), filtros adaptativos (LMS, Wiener) etc. Esta decisi\'on se justifica en que la se\~nal muscular principal se adquiere directamente de la salida de la envolvente del sensor MyoWare 2.0, la cual ya integra una etapa anal\'ogica de amplificaci\'on, rectificaci\'on de onda completa y filtrado paso-bajas como previemente se habia mencionado. En su lugar, el sistema se basa en t\'ecnicas de procesamiento temporal por ventanas y suavizado determin\'istico orientadas a la eficiencia en tiempo real, las cuales se desglosan en la Tabla~\ref{tab:procesamiento_temporal}.\cite{b5}
+
+Para garantizar la estabilidad del sistema sin un alto costo computacional, se implementaron cuatro estrategias de procesamiento temporal descritas a continuaci\'on:
+
+\begin{description}
+    \item{- Promedio de 40 muestras (ESP32):} Operaci\'on basada en un promedio m\'ovil simple que suaviza la se\~nal ENV residual entregada por el sensor MyoWare antes de enviarla por puerto serial.
+    \item{- Promedio EMG de 2 segundos:} Algoritmo de promedio m\'ovil extendido dise\~nado para visualizar de forma gr\'afica la tendencia de activaci\'on muscular.
+    \item{- Ventana de audio de $0.2\text{ s}$:} Segmentaci\'on mediante una ventana rectangular s\'incrona utilizada para extraer los bloques de datos necesarios para el c\'alculo de energ\'ia y ZCR.
+    \item{- Dos lecturas consecutivas EMG:} Filtro l\'ogico de protecci\'on temporal que exige estabilidad en la contracci\'on para evitar activaciones accidentales provocadas por picos de movimiento aislados o artefactos.
+\end{description}
+% Aquí explicas cómo programaron la condición de que a fuerza 
+% coincidan ambas señales en tiempo real para activar el servomotor 
+% o indicador, y cómo la GUI despliega el estado de fallo si uno falla.
+
+\section{III. Resultados experimentales}
+
+Para la fase experimental se conecta al sujeto de pruebas en el ante brazo en el vientre muscular del grupo flexor superficial del antebrazo (espec\'ficamente en la región anterior y medial del antebrazo, cerca del m\'sculo flexor carpi radialis o palmar mayor, y el pronator teres). Este grupo muscular es el encargado de realizar la flexión de la muñeca lo cual coincide con el gesto de cerrar el puño con fuerza que se necesita para activar el sensor. El codigo cuenta con un apartado para ingresar el nombre del usuario para posteriormente registrar la actividad de EMG y Voz en un archivo .csv. Una vez que se coloca el nombre del usuario, se debera iniciar manualmente la toma de estados del sujeto para poder calcular mas metricas correspondientes, una vez terminado este proceso el codigo inicia su funcion principal, mostrando cuando se logre tener senal de EMG y Voz a la vez, en caso de faltar alguna de las dos lo indicar\'a a travez de un texto en pantalla.
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\columnwidth]{resultados.jpeg}
+    \caption{Sujeto de pruebas logrando activar la interfaz mediante el correcto uso de ambas se\~nales.}
+    \label{fig:resultados_experimentales}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\columnwidth, angle=180]{Samuel.jpeg}
+    \caption{Segundo sujeto de pruebas logrando activar la interfaz mediante el correcto uso de ambas se\~nales.}
+    \label{fig:resultados_experimentales3}
+\end{figure}
+\
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\columnwidth]{Prueba exitosa.png}
+    \caption{Interfaz con el estado Activo.}
+    \label{fig:resultados_experimentales2}
+\end{figure}
+
+
+
+\begin{thebibliography}{00}
+\bibitem{b1} Advancer Technologies, ``MyoWare 2.0 Muscle Sensor Technical Specifications,'' MyoWare. [En l\'inea]. Disponible en: https://myoware.com/products/technical-specifications/.
+\bibitem{b2} Espressif Systems, ``ESP32 Series Datasheet,'' v4.4, 2024. [En l\'inea]. Disponible en: https://www.espressif.com. [Accedido: 19-jun-2026].
+\bibitem{b3} G. van Rossum, ``The Python Library Reference,'' Release 3.12, Python Software Foundation, 2023. [En l\'inea]. Disponible en: https://www.python.org. [Accedido: 19-jun-2026].
+\bibitem{b4} Arduino, ``Arduino Software (IDE),'' Arduino, 2024. [En l\'inea]. Disponible en: https://www.arduino.cc. [Accedido: 19-jun-2026].
+\bibitem{b5} J. G. Proakis y D. G. Manolakis, \textit{Tratamiento digital de se\~nales}, 4a ed. Madrid, Espa\~na: Pearson Education, 2007.
+\bibitem{b6} REA, ``M\'etodos para calcular cruces por cero: Definici\'on del m\'etodo,'' \textit{Recursos Educativos Abiertos}. [En l\'inea]. Disponible en: https://rea.tlaxcala.tecnm.mx. 
+\bibitem{b8} VAD Tech Research, ``Voice Activity Detection Guide 2026: Complete Technical Overview,'' \textit{Signal Processing Insights}, 2026. [En l\'inea]. Disponible en: https://www.signalprocessinginsights.com/vad-guide-2026. [Accedido: 19-jun-2026].
+\end{thebibliography}
+\end{document}
